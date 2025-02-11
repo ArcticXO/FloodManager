@@ -1,24 +1,13 @@
-//
-//  ContentView.swift
-//  floodreporter
-//
-//  Created by Ali Al Abdullah on 31/01/2025.
-//
-
 import SwiftUI
 
 struct ContentView: View {
-    var body: some View {
-        VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-            Text("Hello, world!")
-        }
-        .padding()
-    }
-}
+    @State private var isLoggedIn: Bool = false // Use @State to track login state
 
-#Preview {
-    ContentView()
+    var body: some View {
+        if isLoggedIn {
+            MainTabView(isLoggedIn: $isLoggedIn) // Pass the binding to MainTabView
+        } else {
+            LoginView(isLoggedIn: $isLoggedIn) // Pass the binding to LoginView
+        }
+    }
 }
