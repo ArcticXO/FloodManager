@@ -49,6 +49,31 @@ class Admin(db.Model):
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
 
+# Route to register a new user
+@app.route("/register", methods=["POST"])
+def register():
+    try:
+        data = request.get_json()
+        username = data.get("username")
+        password = data.get("password")
+
+        if not username or not password:
+            return jsonify({"error": "Username and password are required"}), 400
+
+        if Auth.query.filter_by(username=username).first():
+            return jsonify({"error": "Username already exists"}), 400
+
+        new_user = Auth(username=username)
+        new_user.set_password(password)
+
+        db.session.add(new_user)
+        db.session.commit()
+
+        return jsonify({"message": "User registered successfully"}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 # Health check route
 @app.route("/", methods=["GET"])
 def home():
