@@ -12,7 +12,7 @@ app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db = SQLAlchemy(app)
 
 class Auth(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
     password_hash = db.Column(db.String(256), nullable=False)
     floods = db.relationship('Flood', backref='user', lazy=True)
@@ -24,12 +24,24 @@ class Auth(db.Model):
         return check_password_hash(self.password_hash, password)
 
 class Flood(db.Model):
-    flood_id = db.Column(db.Integer, primary_key=True)
+    __tablename__ = 'floods'
+    flood_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     user_id = db.Column(db.Integer, db.ForeignKey('auth.id'), nullable=False)
     gps_longitude = db.Column(db.Float, nullable=False)
     gps_latitude = db.Column(db.Float, nullable=False)
     radius = db.Column(db.Float, nullable=False)
     severity = db.Column(db.Integer, nullable=False)
-    # ... other flood fields
+    report_time = db.Column(db.DateTime, default=db.func.now())
+    title = db.Column(db.String(255), nullable=False)
+    description = db.Column(db.Text, nullable=False)
 
-# ... (rest of the app.py file will be added in later commits)
+class Admin(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    password_hash = db.Column(db.String(128), nullable=False)
+
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
