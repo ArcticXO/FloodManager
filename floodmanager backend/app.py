@@ -27,7 +27,31 @@ class Auth(db.Model):
 def home():
     return jsonify({"message": "Flood Reporting API is running"}), 200
 
+@app.route("/register", methods=["POST"])
+def register():
+    try:
+        data = request.get_json()
+        username = data.get("username")
+        password = data.get("password")
+
+        if not username or not password:
+            return jsonify({"error": "Username and password are required"}), 400
+
+        if Auth.query.filter_by(username=username).first():
+            return jsonify({"error": "Username already exists"}), 400
+
+        new_user = Auth(username=username)
+        new_user.set_password(password)
+
+        db.session.add(new_user)
+        db.session.commit()
+
+        return jsonify({"message": "User registered successfully"}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 if __name__ == "__main__":
-    with app.app_context():  # Important: Create tables within app context
+    with app.app_context():  
         db.create_all()
     app.run(host="0.0.0.0", port=4999, debug=True)
