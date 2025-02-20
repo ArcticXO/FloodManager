@@ -3,6 +3,7 @@ from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 import os
 from dotenv import load_dotenv
+from sqlalchemy import text
 
 load_dotenv()
 
@@ -141,6 +142,39 @@ def report_flood():
 
     except Exception as e:
         db.session.rollback()
+        return jsonify({'error': 'Internal server error'}), 500
+
+# Route to view all floods
+@app.route('/view_floods', methods=['GET'])
+def view_floods():
+    try:
+        result = db.session.execute(
+            text("""SELECT floods.flood_id, floods.user_id, floods.gps_longitude, floods.gps_latitude,
+                    floods.radius, floods.severity, floods.report_time, auth.username, floods.title, floods.description
+                    FROM floods
+                    JOIN auth ON floods.user_id = auth.id""")
+        )
+        floods = result.fetchall()
+
+        floods_list = []
+        for flood in floods:
+            flood_data = {
+                'flood_id': flood.flood_id,
+                'user_id': flood.user_id,
+                'gps_longitude': flood.gps_longitude,
+                'gps_latitude': flood.gps_latitude,
+                'radius': flood.radius,
+                'severity': flood.severity,
+                'time_reported': flood.report_time.strftime('%Y-%m-%d %H:%M:%S') if flood.report_time else None,
+                'username': flood.username,
+                'title': flood.title,
+                'description': flood.description
+            }
+            floods_list.append(flood_data)
+
+        return jsonify(floods_list), 200
+
+    except Exception as e:
         return jsonify({'error': 'Internal server error'}), 500
 
 # Health check route
