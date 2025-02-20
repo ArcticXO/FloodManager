@@ -95,6 +95,54 @@ def authenticate():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# Route to report a flood
+@app.route('/report_flood', methods=['POST'])
+def report_flood():
+    try:
+        data = request.get_json()
+
+        if 'username' not in data or 'password' not in data:
+            return jsonify({'error': 'Username and password are required'}), 400
+
+        user = Auth.query.filter_by(username=data['username']).first()
+        if not user or not user.check_password(data['password']):
+            return jsonify({'error': 'Incorrect username or password'}), 400
+
+        required_fields = ['gps_longitude', 'gps_latitude', 'radius', 'severity', 'title', 'description']
+        if not all(field in data for field in required_fields):
+            return jsonify({'error': 'Missing required fields'}), 400
+        if not (1 <= data['severity'] <= 5):
+            return jsonify({'error': 'Severity must be between 1 and 5'}), 400
+
+        try:
+            gps_longitude = float(data['gps_longitude'])
+            gps_latitude = float(data['gps_latitude'])
+            radius = float(data['radius'])
+            severity = int(data['severity'])
+            title = data['title']
+            description = data['description']
+        except (ValueError, TypeError):
+            return jsonify({'error': 'Incorrect data types in request'}), 400
+
+        flood_report = Flood(
+            user_id=user.id,
+            gps_longitude=gps_longitude,
+            gps_latitude=gps_latitude,
+            radius=radius,
+            severity=severity,
+            title=title,
+            description=description
+        )
+
+        db.session.add(flood_report)
+        db.session.commit()
+
+        return jsonify({'message': 'Flood reported successfully'}), 201
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Internal server error'}), 500
+
 # Health check route
 @app.route("/", methods=["GET"])
 def home():
