@@ -23,6 +23,19 @@ class Auth(db.Model):
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
 
+class Flood(db.Model):
+    __tablename__ = 'floods'
+    flood_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('auth.id'), nullable=False)
+    gps_longitude = db.Column(db.Float, nullable=False)
+    gps_latitude = db.Column(db.Float, nullable=False)
+    radius = db.Column(db.Float, nullable=False)
+    severity = db.Column(db.Integer, nullable=False)
+    report_time = db.Column(db.DateTime, default=db.func.now())
+    title = db.Column(db.String(255), nullable=False)
+    description = db.Column(db.Text, nullable=False)
+
+
 @app.route("/", methods=["GET"])
 def home():
     return jsonify({"message": "Flood Reporting API is running"}), 200
