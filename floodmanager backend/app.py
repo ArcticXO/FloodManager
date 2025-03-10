@@ -4,6 +4,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 import os
 from dotenv import load_dotenv
 from sqlalchemy import text
+import requests
 
 load_dotenv()
 
@@ -18,7 +19,7 @@ class Auth(db.Model):
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
     password_hash = db.Column(db.String(256), nullable=False)
-    floods = db.relationship('Flood', backref='user', lazy=True)  # Add relationship
+    floods = db.relationship('Flood', backref='user', lazy=True)
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -182,7 +183,21 @@ def view_floods():
 def home():
     return jsonify({"message": "Flood Reporting API is running"}), 200
 
+# Route to fetch flood warnings from the government API
+@app.route('/flood_warnings', methods=['GET'])
+def flood_warnings():
+    try:
+        api_url = "https://environment.data.gov.uk/flood-monitoring/id/floods"
+        response = requests.get(api_url)
+        response.raise_for_status()
+        data = response.json()
+        return jsonify(data), 200
+    except requests.exceptions.RequestException as e:
+        return jsonify({"error": f"Failed to fetch data from government API: {e}"}), 500
+    except ValueError:
+        return jsonify({"error": "Invalid JSON response from government API"}), 500
+
 if __name__ == "__main__":
     with app.app_context():
-        db.create_all()  # Create database tables within the app context
+        db.create_all()
     app.run(host="0.0.0.0", port=4999, debug=True)
