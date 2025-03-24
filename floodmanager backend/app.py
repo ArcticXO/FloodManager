@@ -5,6 +5,12 @@ import os
 from dotenv import load_dotenv
 from sqlalchemy import text
 import requests
+import numpy as np
+from shapely.geometry import Polygon, MultiPolygon, mapping, shape, Point
+from shapely.ops import unary_union
+from shapely.validation import make_valid
+# Fixed import for simplification
+from simplification.cutil import simplify_coords
 
 load_dotenv()
 
@@ -197,6 +203,193 @@ def flood_warnings():
     except ValueError:
         return jsonify({"error": "Invalid JSON response from government API"}), 500
 
+# Fixed helper functions for geometry processing with topology error handling
+def simplify_geometry(polygon_data):
+    """Simplify the polygon geometry to reduce the number of points with topology error handling."""
+    try:
+        # Convert GeoJSON to Shapely geometry
+        features = polygon_data.get('features', [])
+        if not features:
+            return None
+        
+        # Process the geometry
+        feature = features[0]
+        geom = shape(feature['geometry'])
+        
+        # First, ensure the geometry is valid
+        try:
+            if not geom.is_valid:
+                # Try to make the geometry valid
+                geom = make_valid(geom)
+                
+                # If the geometry is still not valid or is empty, fallback to a simple representation
+                if not geom.is_valid or geom.is_empty:
+                    # Create a simplified representation based on the centroid
+                    centroid = geom.centroid
+                    # Return a simple polygon as a fallback
+                    simple_poly = Point(centroid).buffer(0.01)
+                    return mapping(simple_poly)
+        except Exception as e:
+            # If validation fix fails, fallback to simple representation
+            try:
+                bounds = geom.bounds
+                centroid_x = (bounds[0] + bounds[2]) / 2
+                centroid_y = (bounds[1] + bounds[3]) / 2
+                simple_poly = Point(centroid_x, centroid_y).buffer(0.01)
+                return mapping(simple_poly)
+            except:
+                # If that fails too, return a simple square
+                return {
+                    "type": "Polygon",
+                    "coordinates": [[[-0.1, -0.1], [-0.1, 0.1], [0.1, 0.1], [0.1, -0.1], [-0.1, -0.1]]]
+                }
+        
+        # Apply different simplification levels based on complexity
+        try:
+            if isinstance(geom, MultiPolygon):
+                simplified_polys = []
+                for poly in geom.geoms:
+                    if poly.is_valid and not poly.is_empty:
+                        try:
+                            # Buffer with 0 distance can sometimes fix self-intersections
+                            poly = poly.buffer(0)
+                            # Use shapely's built-in simplify with preserve_topology=True as a safer alternative
+                            simplified_poly = poly.simplify(0.0005, preserve_topology=True)
+                            if simplified_poly.is_valid and not simplified_poly.is_empty:
+                                simplified_polys.append(simplified_poly)
+                        except:
+                            # Skip problematic polygons
+                            pass
+                
+                if not simplified_polys:
+                    # If all polygons failed, return centroid buffer
+                    return mapping(Point(geom.centroid).buffer(0.01))
+                
+                simplified_geom = unary_union(simplified_polys)
+            else:
+                # Buffer with 0 distance can sometimes fix self-intersections
+                geom = geom.buffer(0)
+                # Use shapely's built-in simplify with preserve_topology=True as a safer alternative
+                simplified_geom = geom.simplify(0.0005, preserve_topology=True)
+            
+            # Convert back to GeoJSON format
+            return mapping(simplified_geom)
+        except Exception as e:
+            # If simplification fails, return a simple representation
+            return mapping(Point(geom.centroid).buffer(0.01))
+            
+    except Exception as e:
+        return {"error": f"Failed to simplify geometry: {str(e)}"}
+
+def calculate_centroid(polygon_data):
+    """Calculate the centroid and radius for a circular representation."""
+    try:
+        features = polygon_data.get('features', [])
+        if not features:
+            return None
+        
+        try:
+            geom = shape(features[0]['geometry'])
+            # Try to ensure geometry is valid
+            if not geom.is_valid:
+                geom = make_valid(geom)
+            
+            if geom.is_empty:
+                # If geometry is empty after validation, use the bounds to estimate location
+                bounds = features[0]['geometry'].get('bbox', [0, 0, 0, 0])
+                centroid_x = (bounds[0] + bounds[2]) / 2 if len(bounds) >= 4 else 0
+                centroid_y = (bounds[1] + bounds[3]) / 2 if len(bounds) >= 4 else 0
+                return {
+                    "type": "Circle",
+                    "coordinates": [centroid_x, centroid_y],
+                    "radius": 0.01  # Default small radius
+                }
+            
+            centroid = geom.centroid
+            
+            # Calculate a representative radius (distance to furthest point)
+            max_distance = 0.01  # Default small radius
+            
+            try:
+                if isinstance(geom, MultiPolygon):
+                    # For multipolygons, find the maximum distance from centroid to any point
+                    for poly in geom.geoms:
+                        if poly.is_valid and not poly.is_empty:
+                            for point in poly.exterior.coords:
+                                distance = ((point[0] - centroid.x)**2 + (point[1] - centroid.y)**2)**0.5
+                                max_distance = max(max_distance, distance)
+                elif isinstance(geom, Polygon) and geom.is_valid and not geom.is_empty:
+                    # For single polygons
+                    for point in geom.exterior.coords:
+                        distance = ((point[0] - centroid.x)**2 + (point[1] - centroid.y)**2)**0.5
+                        max_distance = max(max_distance, distance)
+            except:
+                # If calculation fails, use a default radius
+                max_distance = 0.01
+            
+            return {
+                "type": "Circle",
+                "coordinates": [centroid.x, centroid.y],
+                "radius": max_distance  # This is in the same units as the coordinates (degrees)
+            }
+        except Exception as e:
+            # Fallback for any geometry processing errors
+            return {
+                "type": "Circle",
+                "coordinates": [0, 0],  # Default coordinates
+                "radius": 0.01,  # Default radius
+                "error": f"Geometry processing error: {str(e)}"
+            }
+            
+    except Exception as e:
+        return {"error": f"Failed to calculate centroid: {str(e)}"}
+
+# Route to get simplified flood areas
+@app.route('/simplified_flood_areas', methods=['GET'])
+def simplified_flood_areas():
+    try:
+        # Get flood warnings to extract the polygon URLs
+        api_url = "https://environment.data.gov.uk/flood-monitoring/id/floods"
+        response = requests.get(api_url)
+        response.raise_for_status()
+        data = response.json()
+        
+        simplified_data = []
+        
+        # Process each flood item
+        for item in data.get('items', []):
+            flood_info = {
+                "description": item.get('description', ''),
+                "centroid": {
+                    "coordinates": [0, 0],  # Default coordinates
+                    "radius": 0.01          # Default radius
+                }
+            }
+            
+            # Get polygon data if available
+            polygon_url = item.get('floodArea', {}).get('polygon')
+            if polygon_url:
+                try:
+                    polygon_response = requests.get(polygon_url)
+                    polygon_response.raise_for_status()
+                    polygon_data = polygon_response.json()
+                    
+                    # Calculate centroid as an alternative representation
+                    centroid_info = calculate_centroid(polygon_data)
+                    flood_info['centroid'] = centroid_info
+                    
+                except Exception as e:
+                    # Provide fallback centroid
+                    flood_info['centroid'] = {
+                        "coordinates": [0, 0],  # Default coordinates
+                        "radius": 0.01           # Default radius
+                    }
+            
+            simplified_data.append(flood_info)
+        
+        return jsonify({"items": simplified_data}), 200
+    except Exception as e:
+        return jsonify({"error": f"Error processing flood data: {str(e)}"}), 500
 if __name__ == "__main__":
     with app.app_context():
         db.create_all()
