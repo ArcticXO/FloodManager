@@ -1,0 +1,1 @@
+Aston Univerity FloodManager Final Application including Flask backend logic, Frontend Swift. database structure is mentioned in the flask but database is hosted online using Aivien's PostgreSQL service.
